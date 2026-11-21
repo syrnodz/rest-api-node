@@ -1,5 +1,5 @@
 <div align="center"> 
-### Tugas iot
+Tugas iot
 </div>
  Nama: Muhammad Ali Akbar
  NPM : 2410010012
