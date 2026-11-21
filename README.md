@@ -4,7 +4,7 @@
 
 </div>
 
- -Nama: Muhammad Ali Akbar
- -NPM : 2410010012
- -Kelas : 5C
- -Mata kuliah IoT
+ - Nama: Muhammad Ali Akbar
+ - NPM : 2410010012
+ - Kelas : 5C
+ - Mata kuliah IoT
