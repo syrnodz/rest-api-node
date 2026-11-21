@@ -1,0 +1,6 @@
+venv/
+node_modules/
+__pycache__/
+*.db
+*.backup
+node-red-data/.config.*.json

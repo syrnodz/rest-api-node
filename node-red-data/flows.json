@@ -1,0 +1,438 @@
+[
+    {
+        "id": "flow_api",
+        "type": "tab",
+        "label": "IoT REST API Full",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "mqtt_broker_config",
+        "type": "mqtt-broker",
+        "name": "Local Mosquitto",
+        "broker": "localhost",
+        "port": "1883",
+        "clientid": "node-red-backend",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true
+    },
+    {
+        "id": "ws_server_config",
+        "type": "websocket-listener",
+        "path": "/ws/sensor",
+        "wholemsg": "false"
+    },
+    {
+        "id": "mqtt_sensor_in",
+        "type": "mqtt in",
+        "z": "flow_api",
+        "name": "Subscribe Sensor",
+        "topic": "iot/sensor",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "mqtt_broker_config",
+        "inputs": 0,
+        "x": 150,
+        "y": 120,
+        "wires": [
+            [
+                "store_sensor"
+            ]
+        ]
+    },
+    {
+        "id": "store_sensor",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Proses, Threshold & DB Args",
+        "func": "var data = msg.payload;\nif (typeof data === 'string') { data = JSON.parse(data); }\ndata.received = new Date().toISOString();\n\nvar threshold = flow.get('tempThreshold');\nif (threshold === undefined || threshold === null) {\n    threshold = 30;\n    flow.set('tempThreshold', threshold);\n}\n\nvar suhu = Number(data.suhu);\nvar kelembaban = Number(data.kelembaban);\nvar isAlert = suhu > threshold;\n\ndata.threshold = threshold;\ndata.alert = isAlert;\nflow.set('lastSensor', data);\n\nvar wsMsg = {\n    payload: {\n        type: 'sensor_update',\n        threshold: threshold,\n        data: data\n    }\n};\n\nvar ts = String(data.timestamp || data.received).replace(/\\s+/g, '');\nvar rcv = String(data.received).replace(/\\s+/g, '');\nvar dbArgs = {\n    payload: 'insert ' + suhu + ' ' + kelembaban + ' ' + Number(threshold) + ' ' + (isAlert ? 1 : 0) + ' ' + ts + ' ' + rcv\n};\n\nvar notifMsg = null;\nif (isAlert) {\n    var notif = {\n        type: 'ALERT_SUHU',\n        suhu: suhu,\n        threshold: threshold,\n        message: 'PERINGATAN: Suhu ' + suhu + ' C melewati batas ' + threshold + ' C!',\n        timestamp: data.received\n    };\n    node.warn(notif.message);\n    notifMsg = { payload: notif, topic: 'iot/notifikasi' };\n}\n\nreturn [wsMsg, dbArgs, notifMsg];",
+        "outputs": 3,
+        "x": 410,
+        "y": 120,
+        "wires": [
+            [
+                "debug_sensor",
+                "ws_out_sensor"
+            ],
+            [
+                "exec_db_insert"
+            ],
+            [
+                "mqtt_publish_notif",
+                "debug_notif"
+            ]
+        ]
+    },
+    {
+        "id": "debug_sensor",
+        "type": "debug",
+        "z": "flow_api",
+        "name": "Log Sensor",
+        "active": true,
+        "complete": "payload",
+        "x": 690,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "ws_out_sensor",
+        "type": "websocket out",
+        "z": "flow_api",
+        "name": "WS Broadcast (/ws/sensor)",
+        "server": "ws_server_config",
+        "client": "",
+        "x": 730,
+        "y": 105,
+        "wires": []
+    },
+    {
+        "id": "exec_db_insert",
+        "type": "exec",
+        "z": "flow_api",
+        "command": "python3 /home/ali/Documents/rest-api-node/db_helper.py",
+        "addpay": "payload",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "",
+        "winHide": false,
+        "oldrc": false,
+        "name": "SQLite Insert (Python)",
+        "x": 710,
+        "y": 150,
+        "wires": [
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "mqtt_publish_notif",
+        "type": "mqtt out",
+        "z": "flow_api",
+        "name": "Publish Notifikasi",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "mqtt_broker_config",
+        "x": 700,
+        "y": 195,
+        "wires": []
+    },
+    {
+        "id": "debug_notif",
+        "type": "debug",
+        "z": "flow_api",
+        "name": "Log Alert",
+        "active": true,
+        "complete": "payload",
+        "x": 670,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "http_get_suhu",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "GET /api/suhu",
+        "url": "/api/suhu",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 140,
+        "y": 310,
+        "wires": [
+            [
+                "auth_suhu"
+            ]
+        ]
+    },
+    {
+        "id": "auth_suhu",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Auth X-API-Key",
+        "func": "const VALID_KEY = 'iot-secret-2026';\nconst key = msg.req && msg.req.headers ? msg.req.headers['x-api-key'] : '';\nif (key !== VALID_KEY) {\n    msg.statusCode = 401;\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    msg.payload = {status: 'error', message: 'Unauthorized: X-API-Key tidak valid'};\n    return [null, msg];\n}\nmsg.payload = 'latest';\nreturn [msg, null];",
+        "outputs": 2,
+        "x": 340,
+        "y": 310,
+        "wires": [
+            [
+                "exec_db_latest"
+            ],
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "exec_db_latest",
+        "type": "exec",
+        "z": "flow_api",
+        "command": "python3 /home/ali/Documents/rest-api-node/db_helper.py",
+        "addpay": "payload",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "",
+        "winHide": false,
+        "oldrc": false,
+        "name": "SQLite Latest",
+        "x": 540,
+        "y": 295,
+        "wires": [
+            [
+                "resp_suhu"
+            ],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "resp_suhu",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Response Suhu",
+        "func": "var threshold = flow.get('tempThreshold');\nif (threshold === undefined || threshold === null) threshold = 30;\nvar row = JSON.parse(msg.payload);\nmsg.statusCode = 200;\nmsg.headers = {'Access-Control-Allow-Origin': '*'};\nmsg.payload = {\n    status: 'success',\n    threshold: threshold,\n    data: row,\n    server_time: new Date().toISOString()\n};\nreturn msg;",
+        "outputs": 1,
+        "x": 740,
+        "y": 295,
+        "wires": [
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "http_get_history",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "GET /api/history",
+        "url": "/api/history",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 140,
+        "y": 390,
+        "wires": [
+            [
+                "auth_history"
+            ]
+        ]
+    },
+    {
+        "id": "auth_history",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Auth X-API-Key",
+        "func": "const VALID_KEY = 'iot-secret-2026';\nconst key = msg.req && msg.req.headers ? msg.req.headers['x-api-key'] : '';\nif (key !== VALID_KEY) {\n    msg.statusCode = 401;\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    msg.payload = {status: 'error', message: 'Unauthorized: X-API-Key tidak valid'};\n    return [null, msg];\n}\nmsg.payload = 'history';\nreturn [msg, null];",
+        "outputs": 2,
+        "x": 340,
+        "y": 390,
+        "wires": [
+            [
+                "exec_db_history"
+            ],
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "exec_db_history",
+        "type": "exec",
+        "z": "flow_api",
+        "command": "python3 /home/ali/Documents/rest-api-node/db_helper.py",
+        "addpay": "payload",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "",
+        "winHide": false,
+        "oldrc": false,
+        "name": "SQLite History",
+        "x": 540,
+        "y": 375,
+        "wires": [
+            [
+                "resp_history"
+            ],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "resp_history",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Response History",
+        "func": "var rows = JSON.parse(msg.payload);\nmsg.statusCode = 200;\nmsg.headers = {'Access-Control-Allow-Origin': '*'};\nmsg.payload = {\n    status: 'success',\n    source: 'python-sqlite3',\n    count: rows.length,\n    data: rows\n};\nreturn msg;",
+        "outputs": 1,
+        "x": 740,
+        "y": 375,
+        "wires": [
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "http_post_kontrol",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "POST /api/kontrol",
+        "url": "/api/kontrol",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 470,
+        "wires": [
+            [
+                "auth_kontrol"
+            ]
+        ]
+    },
+    {
+        "id": "auth_kontrol",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Auth X-API-Key",
+        "func": "const VALID_KEY = 'iot-secret-2026';\nconst key = msg.req && msg.req.headers ? msg.req.headers['x-api-key'] : '';\nif (key !== VALID_KEY) {\n    msg.statusCode = 401;\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    msg.payload = {status: 'error', message: 'Unauthorized: X-API-Key tidak valid'};\n    return [null, msg];\n}\nreturn [msg, null];",
+        "outputs": 2,
+        "x": 340,
+        "y": 470,
+        "wires": [
+            [
+                "proc_kontrol"
+            ],
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "proc_kontrol",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Validasi & Publish",
+        "func": "var body = msg.payload;\nif (!body || !body.device || !body.action) {\n    msg.statusCode = 400;\n    msg.payload = {status: 'error', message: 'device dan action wajib diisi'};\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    return [msg, null];\n}\nvar mqttMsg = {payload: body, topic: 'iot/kontrol'};\nnode.send([null, mqttMsg]);\n\nmsg.statusCode = 200;\nmsg.payload = {status: 'success', message: 'Perintah terkirim', sent: body};\nmsg.headers = {'Access-Control-Allow-Origin': '*'};\nreturn [msg, null];",
+        "outputs": 2,
+        "x": 550,
+        "y": 455,
+        "wires": [
+            [
+                "http_resp_all"
+            ],
+            [
+                "mqtt_publish_kontrol"
+            ]
+        ]
+    },
+    {
+        "id": "mqtt_publish_kontrol",
+        "type": "mqtt out",
+        "z": "flow_api",
+        "name": "Publish Kontrol",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "mqtt_broker_config",
+        "x": 780,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "http_put_threshold",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "PUT /api/threshold",
+        "url": "/api/threshold",
+        "method": "put",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 550,
+        "wires": [
+            [
+                "auth_threshold"
+            ]
+        ]
+    },
+    {
+        "id": "auth_threshold",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Auth X-API-Key",
+        "func": "const VALID_KEY = 'iot-secret-2026';\nconst key = msg.req && msg.req.headers ? msg.req.headers['x-api-key'] : '';\nif (key !== VALID_KEY) {\n    msg.statusCode = 401;\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    msg.payload = {status: 'error', message: 'Unauthorized: X-API-Key tidak valid'};\n    return [null, msg];\n}\nreturn [msg, null];",
+        "outputs": 2,
+        "x": 340,
+        "y": 550,
+        "wires": [
+            [
+                "proc_threshold"
+            ],
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "proc_threshold",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Set Batas Suhu",
+        "func": "var body = msg.payload;\nvar raw = body ? (body.threshold !== undefined ? body.threshold : body.max_suhu) : undefined;\nvar val = Number(raw);\nif (raw === undefined || raw === '' || isNaN(val)) {\n    msg.statusCode = 400;\n    msg.payload = {status: 'error', message: 'Field threshold wajib berupa angka'};\n    msg.headers = {'Access-Control-Allow-Origin': '*'};\n    return msg;\n}\nflow.set('tempThreshold', val);\nmsg.statusCode = 200;\nmsg.payload = {status: 'success', message: 'Batas suhu diperbarui menjadi ' + val + ' C', threshold: val};\nmsg.headers = {'Access-Control-Allow-Origin': '*'};\nreturn msg;",
+        "outputs": 1,
+        "x": 550,
+        "y": 540,
+        "wires": [
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "http_cors",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "OPTIONS CORS",
+        "url": "/api/*",
+        "method": "options",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 140,
+        "y": 620,
+        "wires": [
+            [
+                "cors_resp"
+            ]
+        ]
+    },
+    {
+        "id": "cors_resp",
+        "type": "function",
+        "z": "flow_api",
+        "name": "CORS Headers",
+        "func": "msg.statusCode = 204;\nmsg.payload = '';\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key'\n};\nreturn msg;",
+        "outputs": 1,
+        "x": 350,
+        "y": 620,
+        "wires": [
+            [
+                "http_resp_all"
+            ]
+        ]
+    },
+    {
+        "id": "http_resp_all",
+        "type": "http response",
+        "z": "flow_api",
+        "name": "HTTP Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 960,
+        "y": 430,
+        "wires": []
+    }
+]
